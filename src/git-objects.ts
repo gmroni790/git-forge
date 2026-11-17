@@ -337,44 +337,24 @@ export function applyDelta(base: Buffer, delta: Buffer): Buffer {
 }
 
 /**
- * Find the length of the zlib stream starting at `start` (which must inflate
- * to exactly `expectedSize` bytes). inflateSync tolerates trailing bytes and
- * rejects truncated input, so the predicate "inflates to expectedSize" is
- * monotone in length: exponential search for an upper bound, then binary
- * search for the minimal length. Throws if no length works.
+ * Inflate the zlib stream starting at `start` (which must inflate to exactly
+ * `expectedSize` bytes). One inflateSync call: with `{ info: true }` Node
+ * reports the engine's bytesWritten, the exact number of input bytes the
+ * stream consumed, so no search for the stream end is needed. Throws if the
+ * stream does not inflate or yields the wrong size.
  */
 function inflateAt(buf: Buffer, start: number, end: number, expectedSize: number): { data: Buffer; consumed: number } {
-  const remaining = end - start;
-  const tryLen = (len: number): Buffer | null => {
-    try {
-      const data = inflateSync(buf.subarray(start, start + len));
-      return data.length === expectedSize ? data : null;
-    } catch {
-      return null;
-    }
-  };
-  let lo = 0;
-  let hi = Math.min(16, remaining);
-  let found: Buffer | null = null;
-  while (hi <= remaining) {
-    found = tryLen(hi);
-    if (found !== null) break;
-    lo = hi;
-    if (hi === remaining) break;
-    hi = Math.min(hi * 2, remaining);
+  const view = buf.subarray(start, end);
+  let result: { buffer: Buffer; engine: { bytesWritten: number } };
+  try {
+    result = inflateSync(view, { info: true }) as unknown as { buffer: Buffer; engine: { bytesWritten: number } };
+  } catch {
+    throw new Error('pack: cannot inflate entry');
   }
-  if (found === null) throw new Error('pack: cannot inflate entry');
-  // Binary search for the minimal working length in (lo, hi].
-  let low = lo;
-  let high = hi;
-  while (low + 1 < high) {
-    const mid = Math.floor((low + high) / 2);
-    if (tryLen(mid) !== null) high = mid;
-    else low = mid;
-  }
-  const data = tryLen(high);
-  if (data === null) throw new Error('pack: cannot inflate entry');
-  return { data, consumed: high };
+  const consumed = result.engine.bytesWritten;
+  if (!consumed || consumed <= 0) throw new Error('pack: cannot inflate entry');
+  if (result.buffer.length !== expectedSize) throw new Error('pack: entry size mismatch');
+  return { data: result.buffer, consumed };
 }
 
 interface RawEntry {
