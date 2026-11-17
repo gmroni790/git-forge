@@ -3,6 +3,7 @@
 import type { Oid, PullFile } from './types.ts';
 
 function splitLines(text: string): string[] {
+  if (text === '') return []; // empty content has zero lines, not one empty line
   const lines = text.split('\n');
   if (text.endsWith('\n')) lines.pop(); // drop a single trailing empty piece
   return lines;
